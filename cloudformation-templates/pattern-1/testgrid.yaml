@@ -1,0 +1,36 @@
+# TestGrid configuration file.
+version: "0.9"
+infrastructureConfig: 
+  containerOrchestrationEngine: None
+  iacProvider: CLOUDFORMATION
+  infrastructureProvider: AWS
+  parameters: 
+    - 
+      JDK: ORACLE_JDK8
+  provisioners: 
+    - 
+      description: "Provision Infra for a single node EI cluster"
+      dir: cloudformation-templates/pattern-1
+      name: 01-single-node-deployment
+      scripts: 
+        - 
+          description: "Creates infrastructure for a EI single node deployment."
+          file: pattern-1-cloudformation.template.yml
+          inputParameters: 
+            ALBCertificateARN: "arn:aws:acm:us-east-1:809489900555:certificate/2ab5aded-5df1-4549-9f7e-91639ff6634e"
+            DBPassword: DB_Password
+            EC2KeyPair: testgrid-key
+            parseInfrastructureScript: false
+            region: us-east-1
+          name: infra-for-single-node-ei-deployment
+          type: CLOUDFORMATION
+deploymentConfig:
+  deploymentPatterns:
+    - name: infra-for-single-node-ei-deployment
+      description: Deploys an EI node
+      dir: .
+      scripts:
+        - type: CLOUDFORMATION
+          description: Do an EI single node deployment.
+          file: pattern-1-cloudformation.template.yml
+          inputParameters:

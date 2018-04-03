@@ -1,0 +1,594 @@
+# ----------------------------------------------------------------------------
+#
+# Copyright (c) 2018, WSO2 Inc. (http://www.wso2.org) All Rights Reserved.
+#
+# WSO2 Inc. licenses this file to you under the Apache License,
+# Version 2.0 (the "License"); you may not use this file except
+# in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+#
+# ----------------------------------------------------------------------------
+AWSTemplateFormatVersion: 2010-09-09
+Description: >
+  WSO2 Enterprise Integrator single node deployment
+
+##############################################################################################
+# Mappings for Ubuntu AMIs
+# Refer https://cloud-images.ubuntu.com/locator/ec2/ for ubuntu AMI-ID's for the LTS version
+##############################################################################################
+Mappings:
+  RegionMap:
+    ap-northeast-1:
+      AMI: ami-2f2d9c49
+    ap-northeast-2:
+      AMI: ami-e49e398a
+    ap-south-1:
+      AMI: ami-46eea129
+    ap-southeast-1:
+      AMI: ami-84a6f3e7
+    ap-southeast-2:
+      AMI: ami-4cc8232e
+    ca-central-1:
+      AMI: ami-338b3057
+    eu-central-1:
+      AMI: ami-e22aaa8d
+    eu-west-1:
+      AMI: ami-2e832957
+    eu-west-2:
+      AMI: ami-3fc8d75b
+    sa-east-1:
+      AMI: ami-981550f4
+    us-east-1:
+      AMI: ami-c29e1cb8
+    us-east-2:
+      AMI: ami-f0f8d695
+    us-west-1:
+      AMI: ami-8b90a9eb
+    us-west-2:
+      AMI: ami-25cf1c5d
+
+#############################
+# User inputs
+#############################
+Parameters:
+  AMI:
+    Type: String
+    Default: READ_FROM_REGIONMAP
+    Description: AMI of the region. Keep READ_FROM_REGIONMAP to map Ubuntu AMI from the RegionMap in the script.
+  DBEngine:
+    Type: String
+    Default: "mysql"
+    Description: Database Engine
+    AllowedValues:
+      - mysql
+      - postgres
+      - mariadb
+      - sqlserver-ex
+      - sqlserver-ee
+      - sqlserver-se
+      - sqlserver-web
+      - oracle-se
+      - oracle-se2
+      - oracle-ee
+      - oracle-se1
+  DBEngineVersion:
+    Type: String
+    Description: Database Engine version
+    MinLength: 1
+  DBUsername:
+    Type: String
+    Default: wso2carbon
+    Description: Database master account username
+    MinLength: 1
+    MaxLength: 20
+    ConstraintDescription : minimum - 1, maximum - 20 characters
+  DBPassword:
+    Type: String
+    NoEcho: true
+    Description: Database master account password
+    MinLength: 6
+    ConstraintDescription: minimum - 6 characters
+  DBClass:
+    Default: db.t2.micro
+    Description: Database instance class
+    Type: String
+    AllowedValues:
+      - db.t2.micro
+      - db.t2.small
+      - db.t2.medium
+      - db.t2.large
+      - db.t2.xlarge
+      - db.t2.2xlarge
+      - db.m4.large
+      - db.m4.xlarge
+      - db.m4.2xlarge
+    ConstraintDescription: must be a valid database instance type
+  DBAllocatedStorage:
+    Default: 20
+    Description: Size of the database (GB)
+    Type: Number
+    MinValue: 20
+    MaxValue: 6144
+    ConstraintDescription: minimum - 20 GB, maximum - 6144 GB
+  EC2KeyPair:
+    Description: This is used to ssh to the node. If you don't have a key, please create one from AWS console and rerun the script
+    Type: "AWS::EC2::KeyPair::KeyName"
+  ALBCertificateARN:
+    Type: String
+    Description: Enter the ARN value of the certificate uploaded to ACM for Application Load Balancers
+  WSO2EIInstanceType:
+    Description: EC2 instance type of the WSO2 EI Node [t2.micro is the free tier]
+    Type: String
+    Default: m4.large
+    AllowedValues:
+      - t2.nano
+      - t1.micro
+      - t2.micro
+      - t2.small
+      - t2.medium
+      - t2.large
+      - t2.xlarge
+      - t2.2xlarge
+      - m3.medium
+      - m3.large
+      - m3.xlarge
+      - m3.2xlarge
+      - m4.large
+    ConstraintDescription: must be a valid EC2 instance type
+  WUMUsername:
+    Type: String
+    Default: ""
+    Description: Enter WUM user name
+  WUMPassword:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: Enter WUM user password to get the updated WSO2 products deployed. If not provided standard released pack will be deployed
+  ProductName:
+    Type: String
+    Default: "wso2ei"
+    Description: Enter product name
+  ProductVersion:
+    Type: String
+    Default: "6.1.1"
+    Description: Enter product version
+  OS:
+    Type: String
+    Default: "ubuntu"
+    Description: Enter target OS. This will be the username of the created EC2 instances as well.
+  OSVersion:
+    Type: String
+    Default: "16.04"
+    Description: Enter target OS version.
+  JDK:
+    Type: String
+    Default: "ORACLE_JDK8"
+    Description: Enter target JDK version.
+# Conditions
+Conditions:
+  UseDefaultUbuntuAMI: !Equals [!Ref AMI, READ_FROM_REGIONMAP]
+################################
+# Create AWS resources
+################################
+Resources:
+  ##############################
+  # Create VPC and subnets
+  ##############################
+  WSO2EnvVPC:
+    Type: 'AWS::EC2::VPC'
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      InstanceTenancy: default
+      EnableDnsSupport: 'true'
+      EnableDnsHostnames: 'true'
+      Tags:
+        - Key: Name
+          Value: wso2-vpc
+  WSO2EnvPrivateSubnet1:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select
+        - '0'
+        - !GetAZs ''
+      VpcId: !Ref WSO2EnvVPC
+      Tags:
+        - Key: Name
+          Value: wso2-private-subnet-1
+  WSO2EnvPublicSubnet1:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      CidrBlock: 10.0.254.0/24
+      AvailabilityZone: !Select
+        - '0'
+        - !GetAZs ''
+      VpcId: !Ref WSO2EnvVPC
+      Tags:
+        - Key: Name
+          Value: wso2-public-subnet-1
+  WSO2EnvPublicSubnet2:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      CidrBlock: 10.0.252.0/24
+      AvailabilityZone: !Select
+        - '1'
+        - !GetAZs ''
+      VpcId: !Ref WSO2EnvVPC
+      Tags:
+        - Key: Name
+          Value: wso2-public-subnet-2
+  WSO2EnvInternetGateway:
+    Type: 'AWS::EC2::InternetGateway'
+    Properties: {}
+  WSO2EnvDHCPOptions:
+    Type: 'AWS::EC2::DHCPOptions'
+    Properties:
+      DomainNameServers:
+        - AmazonProvidedDNS
+  WSO2EnvNetworkAcl:
+    Type: 'AWS::EC2::NetworkAcl'
+    Properties:
+      VpcId: !Ref WSO2EnvVPC
+  WSO2EnvPublicRouteTable1:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref WSO2EnvVPC
+  WSO2EnvRouteTable2:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref WSO2EnvVPC
+  WSO2EnvBastionEIPAssociation:
+    Type: 'AWS::EC2::EIPAssociation'
+    Properties:
+      AllocationId: !GetAtt WSO2EnvBastionEIP.AllocationId
+      InstanceId: !Ref WSO2EnvBastionInstance
+
+  ################################
+  # Create network configurations
+  ################################
+  WSO2EnvNATGateway:
+    DependsOn: gw1
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt WSO2EnvEIP1.AllocationId
+      SubnetId: !Ref WSO2EnvPublicSubnet1
+      Tags:
+        - Key: Name
+          Value: WSO2EnvNatGateway
+  acl1:
+    Type: 'AWS::EC2::NetworkAclEntry'
+    Properties:
+      CidrBlock: 0.0.0.0/0
+      Egress: 'true'
+      Protocol: '-1'
+      RuleAction: allow
+      RuleNumber: '100'
+      NetworkAclId: !Ref WSO2EnvNetworkAcl
+  acl2:
+    Type: 'AWS::EC2::NetworkAclEntry'
+    Properties:
+      CidrBlock: 0.0.0.0/0
+      Protocol: '-1'
+      RuleAction: allow
+      RuleNumber: '100'
+      NetworkAclId: !Ref WSO2EnvNetworkAcl
+  subnetacl1:
+    Type: 'AWS::EC2::SubnetNetworkAclAssociation'
+    Properties:
+      NetworkAclId: !Ref WSO2EnvNetworkAcl
+      SubnetId: !Ref WSO2EnvPrivateSubnet1
+  subnetacl2:
+    Type: 'AWS::EC2::SubnetNetworkAclAssociation'
+    Properties:
+      NetworkAclId: !Ref WSO2EnvNetworkAcl
+      SubnetId: !Ref WSO2EnvPublicSubnet1
+  subnetacl3:
+      Type: 'AWS::EC2::SubnetNetworkAclAssociation'
+      Properties:
+        NetworkAclId: !Ref WSO2EnvNetworkAcl
+        SubnetId: !Ref WSO2EnvPublicSubnet2
+  gw1:
+    Type: 'AWS::EC2::VPCGatewayAttachment'
+    Properties:
+      VpcId: !Ref WSO2EnvVPC
+      InternetGatewayId: !Ref WSO2EnvInternetGateway
+  subnetroute1:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      RouteTableId: !Ref WSO2EnvPublicRouteTable1
+      SubnetId: !Ref WSO2EnvPublicSubnet1
+  subnetroute2:
+      Type: 'AWS::EC2::SubnetRouteTableAssociation'
+      Properties:
+        RouteTableId: !Ref WSO2EnvPublicRouteTable1
+        SubnetId: !Ref WSO2EnvPublicSubnet2
+  subnetroute3:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      RouteTableId: !Ref WSO2EnvRouteTable2
+      SubnetId: !Ref WSO2EnvPrivateSubnet1
+  route1:
+    Type: 'AWS::EC2::Route'
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      RouteTableId: !Ref WSO2EnvPublicRouteTable1
+      GatewayId: !Ref WSO2EnvInternetGateway
+    DependsOn: gw1
+  route2:
+    Type: 'AWS::EC2::Route'
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      RouteTableId: !Ref WSO2EnvRouteTable2
+      NatGatewayId: !Ref WSO2EnvNATGateway
+  dchpassoc1:
+    Type: 'AWS::EC2::VPCDHCPOptionsAssociation'
+    Properties:
+      VpcId: !Ref WSO2EnvVPC
+      DhcpOptionsId: !Ref WSO2EnvDHCPOptions
+
+  #########################
+  # Create security groups
+  #########################
+  WSO2EnvInstanceSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Security group for EI EC2 compute instances
+      VpcId: !Ref WSO2EnvVPC
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 22
+        ToPort: 22
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: 8140
+        ToPort: 8140
+        CidrIp: !GetAtt WSO2EnvVPC.CidrBlock
+      - IpProtocol: tcp
+        FromPort: 9763
+        ToPort: 9763
+        SourceSecurityGroupId: !Ref WSO2EnvLBSecurityGroup
+      - IpProtocol: tcp
+        FromPort: 9443
+        ToPort: 9443
+        SourceSecurityGroupId: !Ref WSO2EnvLBSecurityGroup
+  WSO2EnvLBSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Security group for EI ALB
+      VpcId: !Ref WSO2EnvVPC
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 0.0.0.0/0
+  WSO2EnvDBSecurityGroup:
+      Type: 'AWS::EC2::SecurityGroup'
+      Properties:
+        GroupDescription: Security group for EI RDS
+        VpcId: !Ref WSO2EnvVPC
+        SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref WSO2EnvInstanceSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref WSO2EnvInstanceSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 1433
+          ToPort: 1433
+          SourceSecurityGroupId: !Ref WSO2EnvInstanceSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 1521
+          ToPort: 1521
+          SourceSecurityGroupId: !Ref WSO2EnvInstanceSecurityGroup
+
+  ###########################
+  # Create Elastic IPs
+  ###########################
+  WSO2EnvBastionEIP:
+    Type: 'AWS::EC2::EIP'
+    Properties:
+      Domain: vpc
+  WSO2EnvEIP1:
+    Type: 'AWS::EC2::EIP'
+    Properties:
+      Domain: vpc
+
+  #######################
+  # EC2 Compute instances
+  #######################
+  WSO2EnvBastionInstance:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      DisableApiTermination: 'false'
+      InstanceInitiatedShutdownBehavior: stop
+      ImageId:
+       Fn::If: [UseDefaultUbuntuAMI, !FindInMap [RegionMap, !Ref "AWS::Region", AMI], !Ref AMI]
+      InstanceType: t2.micro
+      KeyName: !Ref EC2KeyPair
+      Monitoring: 'false'
+      Tags:
+        - Key: Name
+          Value: wso2-bastion-node
+      NetworkInterfaces:
+        - DeleteOnTermination: 'true'
+          Description: Primary network interface
+          DeviceIndex: 0
+          SubnetId: !Ref WSO2EnvPublicSubnet1
+          GroupSet:
+            - !Ref WSO2EnvInstanceSecurityGroup
+  WSO2EnvEIInstance:
+    Type: 'AWS::EC2::Instance'
+    DependsOn:
+      - WSO2EnvDBInstance
+    Properties:
+      DisableApiTermination: 'false'
+      InstanceInitiatedShutdownBehavior: stop
+      ImageId:
+        Fn::If: [UseDefaultUbuntuAMI, !FindInMap [RegionMap, !Ref "AWS::Region", AMI], !Ref AMI]
+      InstanceType: !Ref WSO2EIInstanceType
+      KeyName: !Ref EC2KeyPair
+      Monitoring: 'false'
+      UserData:
+        Fn::Base64:
+          !Sub |
+            #!/bin/bash
+            set -e
+            mkdir workspace
+            cd workspace
+            git clone https://github.com/wso2/cloudformation-ei --depth 1
+            cd cloudformation-ei
+            scripts/setup-env.sh -os ${OS} -rdsengine ${DBEngine} -wumuser ${WUMUsername} -wumpwd ${WUMPassword} -jdk ${JDK}
+            scripts/setup-ei.sh -os ${OS} -rdshost ${WSO2EnvDBInstance.Endpoint.Address} -rdsport ${WSO2EnvDBInstance.Endpoint.Port} -rdsengine ${DBEngine} -rdsversion ${DBEngineVersion} -rdsusername ${DBUsername} -rdspassword ${DBPassword} -lbhost ${WSO2EnvEIApplicationLoadBalancer.DNSName} -pname ${ProductName} -pversion ${ProductVersion}
+            cat /dev/null > ~/.bash_history && history -c
+      Tags:
+        - Key: Name
+          Value: wso2-ei-node
+      NetworkInterfaces:
+        - DeleteOnTermination: 'true'
+          Description: Primary network interface
+          DeviceIndex: 0
+          SubnetId: !Ref WSO2EnvPrivateSubnet1
+          GroupSet:
+            - !Ref WSO2EnvInstanceSecurityGroup
+
+  #######################
+  # Create RDS instances
+  #######################
+  WSO2EnvDBInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      AllocatedStorage: !Ref DBAllocatedStorage
+      DBInstanceClass: !Ref DBClass
+      Engine: !Ref DBEngine
+      EngineVersion: !Ref DBEngineVersion
+      DBInstanceIdentifier: wso2-ei-dbinstance
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Ref DBPassword
+      AutoMinorVersionUpgrade: false
+      BackupRetentionPeriod: 0
+      DBSubnetGroupName: !Ref WSO2EnvDBSubnetGroup
+      VPCSecurityGroups:
+        - !Ref WSO2EnvDBSecurityGroup
+      AvailabilityZone: !Select
+        - '0'
+        - !GetAZs ''
+    DeletionPolicy: Snapshot
+  WSO2EnvDBSubnetGroup:
+    Type: "AWS::RDS::DBSubnetGroup"
+    Properties:
+      DBSubnetGroupDescription: RDS subnet group
+      SubnetIds:
+        - !Ref WSO2EnvPublicSubnet1
+        - !Ref WSO2EnvPublicSubnet2
+        - !Ref WSO2EnvPrivateSubnet1
+
+  ########################
+  # Create Load Balancers
+  #######################
+  WSO2EnvEIApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: enterprise-integrator-demo
+      Scheme: internet-facing
+      Subnets:
+        - !Ref WSO2EnvPublicSubnet1
+        - !Ref WSO2EnvPublicSubnet2
+      SecurityGroups:
+        - !Ref WSO2EnvLBSecurityGroup
+  WSO2EnvEIALBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 30
+      HealthCheckProtocol: HTTPS
+      HealthCheckTimeoutSeconds: 10
+      HealthyThresholdCount: 4
+      HealthCheckPath: /carbon/admin/login.jsp
+      HealthCheckPort: 9443
+      Matcher:
+        HttpCode: 200
+      Name: ei-carbon-9443
+      Port: 443
+      Protocol: HTTPS
+      TargetGroupAttributes:
+      - Key: deregistration_delay.timeout_seconds
+        Value: '20'
+      - Key: stickiness.enabled
+        Value: 'true'
+      Targets:
+      - Id: !Ref WSO2EnvEIInstance
+        Port: 9443
+      UnhealthyThresholdCount: 3
+      VpcId:
+        Ref: WSO2EnvVPC
+      Tags:
+      - Key: Name
+        Value: ei-carbon-9443
+  WSO2EnvEIALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref WSO2EnvEIALBTargetGroup
+      Certificates:
+        - CertificateArn: !Ref ALBCertificateARN
+      LoadBalancerArn: !Ref WSO2EnvEIApplicationLoadBalancer
+      Port: 443
+      Protocol: HTTPS
+      SslPolicy: ELBSecurityPolicy-TLS-1-1-2017-01
+
+#####################################
+# Print details of the created stack
+#####################################
+Outputs:
+  DatabaseHost:
+    Value: !Sub '${WSO2EnvDBInstance.Endpoint.Address}'
+    Description: "Database Host"
+  DatabasePort:
+    Value: !Sub '${WSO2EnvDBInstance.Endpoint.Port}'
+    Description: "Database Port"
+  BastionEIP:
+    Value: !Sub '${WSO2EnvBastionInstance.PublicIp}'
+    Description: Elastic IP of the Bastion Instance
+  WSO2EIPrivateIP:
+    Value: !Sub '${WSO2EnvEIInstance.PrivateIp}'
+    Description: Private IP of the WSO2 EI Instance
+  esbHost:
+    Value: !Sub '${WSO2EnvEIApplicationLoadBalancer.DNSName}'
+    Description: DNS Name of the ALB fronting WSO2 EI Instance
+  esbPort:
+    Value: 443
+    Description: Listening Port of ALB fronting WSO2 EI Instance
+  bpsHost:
+    Value: !Sub '${WSO2EnvEIApplicationLoadBalancer.DNSName}'
+    Description: DNS Name of the ALB fronting WSO2 EI Instance
+  bpsPort:
+    Value: 443
+    Description: Listening Port of ALB fronting WSO2 EI Instance
+  mbHost:
+    Value: !Sub '${WSO2EnvEIApplicationLoadBalancer.DNSName}'
+      Description: DNS Name of the ALB fronting WSO2 EI Instance
+    mbPort:
+      Value: 443
+      Description: Listening Port of ALB fronting WSO2 EI Instance
+    analyticsHost:
+      Value: !Sub '${WSO2EnvEIApplicationLoadBalancer.DNSName}'
+      Description: DNS Name of the ALB fronting WSO2 EI Instance
+    analyticsPort:
+      Value: 443
+      Description: Listening Port of ALB fronting WSO2 EI Instance
+  WSO2EIMCURL:
+    Value: !Sub 'https://${WSO2EnvEIApplicationLoadBalancer.DNSName}/carbon'
+    Description: Access URL of the Management Console
+
