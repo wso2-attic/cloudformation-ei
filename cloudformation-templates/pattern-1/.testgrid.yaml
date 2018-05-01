@@ -1,0 +1,30 @@
+# TestGrid configuration file.
+version: "0.9"
+infrastructureConfig: 
+  containerOrchestrationEngine: None
+  iacProvider: CLOUDFORMATION
+  infrastructureProvider: AWS
+  provisioners: 
+    - 
+      description: "Provision Infra for EI single node pattern"
+      dir: cloudformation-templates/pattern-1
+      name: 01-single-node-deployment
+      scripts: 
+        - 
+          description: "Creates infrastructure for a EI single node deployment."
+          file: pattern-1-cloudformation.template.yml
+          inputParameters: 
+            DBPassword: DB_Password
+            parseInfrastructureScript: false
+          name: infra-for-single-node-ei-deployment
+          type: CLOUDFORMATION
+deploymentConfig:
+  deploymentPatterns:
+    - name: infra-for-single-node-ei-deployment
+      description: Deploys an EI node
+      dir: .
+      scripts:
+        - type: CLOUDFORMATION
+          description: Do an EI single node deployment.
+          file: pattern-1-cloudformation.template.yml
+          inputParameters:
